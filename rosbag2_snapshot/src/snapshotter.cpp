@@ -85,6 +85,8 @@ bool SnapshotterOptions::addTopic(
   rclcpp::Duration duration,
   int32_t memory)
 {
+  if(blacklist_topics_.find(topic_details) != blacklist_topics_.end()) return false;
+
   SnapshotterTopicOptions ops(duration, memory);
   std::pair<topics_t::iterator, bool> ret;
   ret = topics_.emplace(topic_details, ops);
@@ -287,6 +289,7 @@ Snapshotter::~Snapshotter()
 void Snapshotter::parseOptionsFromParams()
 {
   std::vector<std::string> topics{};
+  std::vector<std::string> blacklist_topics{};
 
   try {
     options_.default_duration_limit_ = rclcpp::Duration::from_seconds(
@@ -319,10 +322,37 @@ void Snapshotter::parseOptionsFromParams()
     }
   }
 
-  if (topics.size() > 0) {
-    options_.all_topics_ = false;
+  try {
+    blacklist_topics = declare_parameter<std::vector<std::string>>(
+      "blacklist_topics", std::vector<std::string>{});
+  } catch (const rclcpp::ParameterTypeException & ex) {
+    if (std::string{ex.what()}.find("not set") == std::string::npos) {
+      RCLCPP_ERROR(get_logger(), "blacklist_topics must be an array of strings.");
+      throw ex;
+    }
+  }
 
-    for (const auto & topic : topics) {
+  try {
+    if(topics.size() > 0 && blacklist_topics.size() > 0)
+      throw rclcpp::exceptions::InvalidParametersException("Non-consisting arguments.");
+    
+  } catch (const rclcpp::exceptions::InvalidParametersException& ex){
+    RCLCPP_ERROR(get_logger(), "Use either `topics` param (record topics which are passed) "
+                                "or `blacklist_topics` (record everything except the ones)");
+    throw ex;
+  }
+
+  if (topics.size() > 0 || blacklist_topics.size() > 0) {
+    std::vector<std::string> topics_to_parse;
+    if(topics.size() > 0){
+      topics_to_parse = topics;
+      options_.all_topics_ = false;
+    } else {
+      topics_to_parse = blacklist_topics;
+      options_.all_topics_ = true;
+    }
+
+    for (const auto & topic : topics_to_parse) {
       std::string prefix = "topic_details." + topic;
       std::string topic_type{};
       SnapshotterTopicOptions opts{};
@@ -364,9 +394,12 @@ void Snapshotter::parseOptionsFromParams()
       TopicDetails dets{};
       dets.name = topic;
       dets.type = topic_type;
-
-      options_.topics_.insert(
-        SnapshotterOptions::topics_t::value_type(dets, opts));
+      
+      if(topics.size() > 0){
+        options_.topics_.insert(SnapshotterOptions::topics_t::value_type(dets, opts));
+      } else {
+        options_.blacklist_topics_.insert(SnapshotterOptions::topics_t::value_type(dets, opts));
+      }
     }
   } else {
     options_.all_topics_ = true;
@@ -433,10 +466,12 @@ void Snapshotter::subscribe(
   opts.topic_stats_options.state = rclcpp::TopicStatisticsState::Enable;
   opts.topic_stats_options.publish_topic = topic_details.name + "/statistics";
 
+  bool is_image = topic_details.type == "sensor_msgs/msg/Image";
+
   auto sub = create_generic_subscription(
     topic_details.name,
     topic_details.type,
-    rclcpp::QoS{10},
+    is_image ? rclcpp::SensorDataQoS() : rclcpp::QoS{10},
     std::bind(&Snapshotter::topicCb, this, _1, queue),
     opts
   );

@@ -131,6 +131,8 @@ struct SnapshotterOptions
   // Provides list of topics to snapshot and their limit configurations
   topics_t topics_;
 
+  topics_t blacklist_topics_;
+
   SnapshotterOptions(
     rclcpp::Duration default_duration_limit = rclcpp::Duration(30s),
     int32_t default_memory_limit = -1);
