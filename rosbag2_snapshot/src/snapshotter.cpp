@@ -289,7 +289,7 @@ Snapshotter::~Snapshotter()
 void Snapshotter::parseOptionsFromParams()
 {
   std::vector<std::string> topics{};
-  std::vector<std::string> blacklist_topics{};
+  bool is_blacklist = true;
 
   try {
     options_.default_duration_limit_ = rclcpp::Duration::from_seconds(
@@ -323,36 +323,19 @@ void Snapshotter::parseOptionsFromParams()
   }
 
   try {
-    blacklist_topics = declare_parameter<std::vector<std::string>>(
-      "blacklist_topics", std::vector<std::string>{});
+    is_blacklist = declare_parameter<bool>(
+      "is_blacklist", true);
   } catch (const rclcpp::ParameterTypeException & ex) {
     if (std::string{ex.what()}.find("not set") == std::string::npos) {
-      RCLCPP_ERROR(get_logger(), "blacklist_topics must be an array of strings.");
+      RCLCPP_ERROR(get_logger(), "is_blacklist must be a bool.");
       throw ex;
     }
   }
 
-  try {
-    if(topics.size() > 0 && blacklist_topics.size() > 0)
-      throw rclcpp::exceptions::InvalidParametersException("Non-consisting arguments.");
-    
-  } catch (const rclcpp::exceptions::InvalidParametersException& ex){
-    RCLCPP_ERROR(get_logger(), "Use either `topics` param (record topics which are passed) "
-                                "or `blacklist_topics` (record everything except the ones)");
-    throw ex;
-  }
+  if (topics.size() > 0) {
+    options_.all_topics_ = is_blacklist ? true : false;
 
-  if (topics.size() > 0 || blacklist_topics.size() > 0) {
-    std::vector<std::string> topics_to_parse;
-    if(topics.size() > 0){
-      topics_to_parse = topics;
-      options_.all_topics_ = false;
-    } else {
-      topics_to_parse = blacklist_topics;
-      options_.all_topics_ = true;
-    }
-
-    for (const auto & topic : topics_to_parse) {
+    for (const auto & topic : topics) {
       std::string prefix = "topic_details." + topic;
       std::string topic_type{};
       SnapshotterTopicOptions opts{};
@@ -395,11 +378,9 @@ void Snapshotter::parseOptionsFromParams()
       dets.name = topic;
       dets.type = topic_type;
       
-      if(topics.size() > 0){
-        options_.topics_.insert(SnapshotterOptions::topics_t::value_type(dets, opts));
-      } else {
-        options_.blacklist_topics_.insert(SnapshotterOptions::topics_t::value_type(dets, opts));
-      }
+      if(is_blacklist) options_.blacklist_topics_.insert(SnapshotterOptions::topics_t::value_type(dets, opts));
+      else options_.topics_.insert(SnapshotterOptions::topics_t::value_type(dets, opts));
+
     }
   } else {
     options_.all_topics_ = true;
@@ -678,8 +659,8 @@ void Snapshotter::pollTopics()
     }
 
     if (name_type.second.size() > 1) {
-      RCLCPP_ERROR(get_logger(), "Subscribed topic has more than one associated type.");
-      return;
+      RCLCPP_INFO_STREAM_ONCE(get_logger(), "Subscribed topic has more than one associated type " << name_type.first );
+      continue;
     }
 
     TopicDetails details{};
