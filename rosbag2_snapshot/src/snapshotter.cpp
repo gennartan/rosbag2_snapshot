@@ -85,6 +85,8 @@ bool SnapshotterOptions::addTopic(
   rclcpp::Duration duration,
   int32_t memory)
 {
+  if(blacklist_topics_.find(topic_details) != blacklist_topics_.end()) return false;
+
   SnapshotterTopicOptions ops(duration, memory);
   std::pair<topics_t::iterator, bool> ret;
   ret = topics_.emplace(topic_details, ops);
@@ -287,6 +289,7 @@ Snapshotter::~Snapshotter()
 void Snapshotter::parseOptionsFromParams()
 {
   std::vector<std::string> topics{};
+  bool is_blacklist = true;
 
   try {
     options_.default_duration_limit_ = rclcpp::Duration::from_seconds(
@@ -319,8 +322,18 @@ void Snapshotter::parseOptionsFromParams()
     }
   }
 
+  try {
+    is_blacklist = declare_parameter<bool>(
+      "is_blacklist", true);
+  } catch (const rclcpp::ParameterTypeException & ex) {
+    if (std::string{ex.what()}.find("not set") == std::string::npos) {
+      RCLCPP_ERROR(get_logger(), "is_blacklist must be a bool.");
+      throw ex;
+    }
+  }
+
   if (topics.size() > 0) {
-    options_.all_topics_ = false;
+    options_.all_topics_ = is_blacklist ? true : false;
 
     for (const auto & topic : topics) {
       std::string prefix = "topic_details." + topic;
@@ -364,9 +377,10 @@ void Snapshotter::parseOptionsFromParams()
       TopicDetails dets{};
       dets.name = topic;
       dets.type = topic_type;
+      
+      if(is_blacklist) options_.blacklist_topics_.insert(SnapshotterOptions::topics_t::value_type(dets, opts));
+      else options_.topics_.insert(SnapshotterOptions::topics_t::value_type(dets, opts));
 
-      options_.topics_.insert(
-        SnapshotterOptions::topics_t::value_type(dets, opts));
     }
   } else {
     options_.all_topics_ = true;
@@ -433,10 +447,12 @@ void Snapshotter::subscribe(
   opts.topic_stats_options.state = rclcpp::TopicStatisticsState::Enable;
   opts.topic_stats_options.publish_topic = topic_details.name + "/statistics";
 
+  bool is_image = topic_details.type == "sensor_msgs/msg/Image";
+
   auto sub = create_generic_subscription(
     topic_details.name,
     topic_details.type,
-    rclcpp::QoS{10},
+    is_image ? rclcpp::SensorDataQoS() : rclcpp::QoS{10},
     std::bind(&Snapshotter::topicCb, this, _1, queue),
     opts
   );
@@ -643,8 +659,8 @@ void Snapshotter::pollTopics()
     }
 
     if (name_type.second.size() > 1) {
-      RCLCPP_ERROR(get_logger(), "Subscribed topic has more than one associated type.");
-      return;
+      RCLCPP_INFO_STREAM_ONCE(get_logger(), "Subscribed topic has more than one associated type " << name_type.first );
+      continue;
     }
 
     TopicDetails details{};
