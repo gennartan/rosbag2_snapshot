@@ -2,7 +2,7 @@
 Changelog for package rosbag2_snapshot_msgs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+1.0.0 (2023-11-28)
+------------------
 * Initial release
 * Contributors: Joshua Whitley
