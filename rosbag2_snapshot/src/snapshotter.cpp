@@ -377,7 +377,7 @@ void Snapshotter::parseOptionsFromParams()
       TopicDetails dets{};
       dets.name = topic;
       dets.type = topic_type;
-      
+
       if(is_blacklist) options_.blacklist_topics_.insert(SnapshotterOptions::topics_t::value_type(dets, opts));
       else options_.topics_.insert(SnapshotterOptions::topics_t::value_type(dets, opts));
 
@@ -453,7 +453,9 @@ void Snapshotter::subscribe(
     topic_details.name,
     topic_details.type,
     is_image ? rclcpp::SensorDataQoS() : rclcpp::QoS{10},
-    std::bind(&Snapshotter::topicCb, this, _1, queue),
+    [queue, this](const std::shared_ptr<const rclcpp::SerializedMessage> message) {
+        this->topicCb(message, queue);
+    },
     opts
   );
 
@@ -482,14 +484,10 @@ bool Snapshotter::writeTopic(
   for (auto msg_it = range.first; msg_it != range.second; ++msg_it) {
     // Create BAG message
     auto bag_message = std::make_shared<rosbag2_storage::SerializedBagMessage>();
-    auto ret = rcutils_system_time_now(&bag_message->time_stamp);
-    if (ret != RCL_RET_OK) {
-      RCLCPP_ERROR(get_logger(), "Failed to assign time to rosbag message.");
-      return false;
-    }
 
     bag_message->topic_name = tm.name;
-    bag_message->time_stamp = msg_it->time.nanoseconds();
+    bag_message->recv_timestamp = msg_it->time.nanoseconds();
+    bag_message->send_timestamp = msg_it->time.nanoseconds();
     bag_message->serialized_data = std::make_shared<rcutils_uint8_array_t>(
       msg_it->msg->get_rcl_serialized_message()
     );
